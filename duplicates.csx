@@ -30,7 +30,7 @@ public class FindDuplicatesCommand : Command<FindDuplicatesCommand.Settings>
 
         if (!System.IO.Directory.Exists(settings.Directory))
         {
-            AnsiConsole.Markup("[red]Das Verzeichnis existiert nicht.[/]\n");
+            AnsiConsole.Markup($"[red]Das Verzeichnis '{settings.Directory}' existiert nicht.[/]\n");
             return 1;
         }
 
