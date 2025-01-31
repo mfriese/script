@@ -102,19 +102,25 @@ public class FindDuplicatesCommand : Command<FindDuplicatesCommand.Settings>
             AnsiConsole.Markup("\n[bold red]Doppelte Dateien gefunden:[/]\n");
             var files = duplicateGroup.Value;
 
-            var selection = new SelectionPrompt<string>()
-                .Title("[yellow]Wähle welche Datei behalten wird:[/]")
-                .PageSize(10)
-                .AddChoices(files);
+            // var selection = new SelectionPrompt<string>()
+            //     .Title("[yellow]Wähle welche Datei behalten wird:[/]")
+            //     .PageSize(10)
+            //     .AddChoices(files);
 
-            var fileToKeep = AnsiConsole.Prompt(selection);
+            var sortedList = files.OrderBy(s => s.Length).ToList();
+
+            var fileToKeep = sortedList.First(); // AnsiConsole.Prompt(selection);
 
             try
             {
                 foreach(var file in files)
                 {
                     if (file == fileToKeep)
+                    {
+                        AnsiConsole.Markup($"[yellow]Behalten: {file}[/]\n");
+
                         continue;
+                    }
 
                     File.Delete(file);
 
