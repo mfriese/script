@@ -11,9 +11,8 @@ using System.Security.Cryptography;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
-var args = Environment.GetCommandLineArgs().Skip(2).ToArray();
 var app = new CommandApp<FindDuplicatesCommand>();
-app.Run(args);
+app.Run(Args);
 
 public class FindDuplicatesCommand : Command<FindDuplicatesCommand.Settings>
 {
@@ -21,11 +20,14 @@ public class FindDuplicatesCommand : Command<FindDuplicatesCommand.Settings>
     {
         [CommandOption("-d|--dir")]
         public string Directory { get; set; } = string.Empty;
+
+        [CommandOption("-a|--auto")]
+        public bool Auto { get; set; } = false;
     }
 
     public override int Execute(CommandContext context, Settings settings)
     {
-        AnsiConsole.Clear();
+        // AnsiConsole.Clear();
         AnsiConsole.Markup("[bold yellow]Doppelte Dateien Finder[/]\n");
 
         if (!System.IO.Directory.Exists(settings.Directory))
@@ -34,17 +36,34 @@ public class FindDuplicatesCommand : Command<FindDuplicatesCommand.Settings>
             return 1;
         }
 
-        var duplicateFiles = FindDuplicateFiles(settings.Directory);
-        ProcessDuplicates(duplicateFiles);
+        var duplicateFiles = FindDuplicateFiles(settings);
+
+        if (duplicateFiles.Count == 0)
+        {
+            AnsiConsole.Markup($"[yellow]Keine Duplikate gefunden.[/]\n");
+            return 0;
+        }
+
+        if (!ShowDuplicatesAndContinue(duplicateFiles, settings))
+        {
+            AnsiConsole.Markup($"[red]Abbruch gewünscht.[/]\n");
+            return 0;
+        }
+        
+        ProcessDuplicates(duplicateFiles, settings);
         return 0;
     }
 
-    static Dictionary<string, List<string>> FindDuplicateFiles(string directory)
+    static Dictionary<string, List<string>> FindDuplicateFiles(Settings settings)
     {
         var fileHashes = new Dictionary<string, List<string>>();
         using var md5 = MD5.Create();
 
-        var files = System.IO.Directory.GetFiles(directory, "*", SearchOption.AllDirectories);
+        var files = System.IO.Directory.GetFiles(
+            settings.Directory,
+            "*",
+            SearchOption.AllDirectories);
+
         int totalFiles = files.Length;
         int processedFiles = 0;
 
@@ -95,21 +114,72 @@ public class FindDuplicatesCommand : Command<FindDuplicatesCommand.Settings>
         return BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
     }
 
-    static void ProcessDuplicates(Dictionary<string, List<string>> duplicates)
+    static bool ShowDuplicatesAndContinue(Dictionary<string, List<string>> duplicates, Settings settings)
+    {
+        var tree = new Tree("[yellow]Dateien[/]");
+
+        foreach (var kvp in duplicates)
+        {
+            var hashCode = tree.AddNode($"[bold]{kvp.Key}[/]");
+
+            var sortedList = kvp.Value.OrderBy(s => s.Length).ToList();
+
+            var fileToKeep = sortedList.First();
+
+            foreach (var fileName in kvp.Value)
+            {
+                if (fileToKeep == fileName)
+                    hashCode.AddNode($"[green]{fileName}[/]");
+                else
+                    hashCode.AddNode($"[blue]{fileName}[/]");
+            }
+        }
+
+        AnsiConsole.Write(tree);
+
+        char answer = AnsiConsole.Prompt(
+            new TextPrompt<char>("Möchtest du fortfahren? [green](a)uto[/] / [yellow](m)anual[/] / [red](c)ancel[/]")
+                .AllowEmpty()
+                .ValidationErrorMessage("[red]Bitte gib nur a, m oder c ein![/]")
+                .Validate(input =>
+                    input == 'a' || input == 'm' || input == 'c'
+                        ? ValidationResult.Success()
+                        : ValidationResult.Error("[red]Ungültige Eingabe, nur a, m oder c erlaubt![/]")
+                )
+        );
+
+        if (answer == 'a')
+            settings.Auto = true;
+        if (answer == 'm')
+            settings.Auto = false;
+
+        return answer != 'c';
+    }
+
+    static void ProcessDuplicates(Dictionary<string, List<string>> duplicates, Settings settings)
     {
         foreach (var duplicateGroup in duplicates)
         {
             AnsiConsole.Markup("\n[bold red]Doppelte Dateien gefunden:[/]\n");
             var files = duplicateGroup.Value;
 
-            // var selection = new SelectionPrompt<string>()
-            //     .Title("[yellow]Wähle welche Datei behalten wird:[/]")
-            //     .PageSize(10)
-            //     .AddChoices(files);
+            string fileToKeep = string.Empty;
 
-            var sortedList = files.OrderBy(s => s.Length).ToList();
+            if (settings.Auto)
+            {
+                var sortedList = files.OrderBy(s => s.Length).ToList();
 
-            var fileToKeep = sortedList.First(); // AnsiConsole.Prompt(selection);
+                fileToKeep = sortedList.First();
+            }
+            else
+            {
+                var selection = new SelectionPrompt<string>()
+                    .Title("[yellow]Wähle welche Datei behalten wird:[/]")
+                    .PageSize(10)
+                    .AddChoices(files);
+
+                fileToKeep = AnsiConsole.Prompt(selection);
+            }
 
             try
             {
