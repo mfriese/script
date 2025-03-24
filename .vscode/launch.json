@@ -5,17 +5,13 @@
       "name": ".NET Script Debug",
       "type": "coreclr",
       "request": "launch",
-      "program": "dotnet",
-      "args": [
-        "script",
-        "--debug",
-        "duplicates.csx",
-        "--",
-        "-d", "/Users/mfriese/Desktop/test"
-      ],
+      "program": "${env:HOME}/.dotnet/tools/dotnet-script",
+      "args": ["list.csx"],
+      "windows": {
+        "program": "${env:USERPROFILE}/.dotnet/tools/dotnet-script.exe",
+      },
       "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "stopAtEntry": false
+      "stopAtEntry": false,
     }
   ]
 }
