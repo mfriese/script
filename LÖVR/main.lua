@@ -1,23 +1,32 @@
-local shaderCode = {[[
+local shaderCode =
+
+{[[
+
 /* VERTEX shader */
+
 out vec4 fragmentClip;
 uniform texture2D heightmap;
 
 vec4 lovrmain() {
   vec3 position = VertexPosition.xyz;
-  position.z = getPixel(heightmap, position.xy).a / 10.;
+  position.z = getPixel(heightmap, position.xy).a / 32.;
   fragmentClip = ClipFromLocal * vec4(position, 1.);
   return fragmentClip;
-} ]], [[
-/* FRAGMENT shader */
-in vec4 fragmentClip;
+}
+  
+]], [[
 
+/* FRAGMENT shader */
+
+in vec4 fragmentClip;
 uniform vec3 fogColor;
 
 vec4 lovrmain() {
   float fogAmount = atan(length(fragmentClip) * 0.1) * 2.0 / PI;
   return vec4(mix(Color.rgb, fogColor, fogAmount), Color.a);
-}]]}
+}
+
+]]}
 
 function lovr.load()
   skyColor = { 0.208, 0.208, 0.275 }
@@ -40,6 +49,6 @@ function lovr.draw(pass)
   pass:setDepthOffset()
 
   pass:setWireframe(true)
-  pass:setColor(0.388, 0.302, 0.412, 0.1)
+  pass:setColor(1., 1., 1., 1.)
   pass:plane(mat4(), 'fill', 100)
 end
