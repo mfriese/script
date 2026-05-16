@@ -16,7 +16,7 @@ fi
 BASENAME="${INPUT%.*}"
 OUTPUT="${BASENAME}.mp4"
 
-VIDEO_BITRATE="590k"
+VIDEO_BITRATE="720k"
 AUDIO_BITRATE="128k"
 
 echo "Starte 2-Pass Konvertierung..."
@@ -56,3 +56,5 @@ caffeinate -i -s ffmpeg -y -i "$INPUT" \
 rm -f "${BASENAME}-0.log" "${BASENAME}-0.log.mbtree"
 
 echo "Fertig: $OUTPUT"
+
+exit 0

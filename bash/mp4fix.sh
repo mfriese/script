@@ -71,8 +71,6 @@ for f in "${mp4_files[@]}"; do
 
         echo "Konvertiere/Remuxe $f → $out ..."
         ffmpeg "${ffmpeg_args[@]}"
-        
-        rm "$f"
     fi
 
     echo "-----------------------------"
