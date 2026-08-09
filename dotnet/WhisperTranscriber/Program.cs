@@ -1,9 +1,12 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Whisper.net;
 using Whisper.net.Ggml;
+using WhisperTranscriber.Extensions;
+using WhisperTranscriber.Interactors;
 
 var app = new CommandApp<TranscribeCommand>();
 app.Configure(config =>
@@ -49,26 +52,36 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
 {
     protected override async Task<int> ExecuteAsync(CommandContext context, TranscribeSettings settings, CancellationToken cancellationToken)
     {
-        if (!await HasFfmpegAsync())
+        AnsiConsole.Write(new FigletText("Whisper Trans").LeftJustified().Color(Color.Yellow));
+        AnsiConsole.Write(new Rule("[bold]Now setting up [/]").Justify(Justify.Left));
+        
+        AnsiConsole.Markup("[yellow]Check ffmpeg[/] ... ");
+        FfmpegExistsInteractor ffmpegExists = new();
+        if (!await ffmpegExists.Invoke())
         {
-            AnsiConsole.MarkupLine("[red]ffmpeg wurde nicht gefunden.[/] Bitte installieren und im PATH bereitstellen.");
+            AnsiConsole.MarkupLine("[red]failed![/] Please install ffmpeg to proceed.");
             return 2;
         }
+        AnsiConsole.MarkupLine("[green]success![/]");
 
+        AnsiConsole.Markup("[yellow]Finding input[/] ... ");
         var searchOption = settings.Recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         var mp3Files = System.IO.Directory.EnumerateFiles(settings.Directory, "*", searchOption)
-            .Where(path => string.Equals(Path.GetExtension(path), ".mp3", StringComparison.OrdinalIgnoreCase))
+            .Where(path => Regex.IsMatch(Path.GetExtension(path), @"\.mp[34]"))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         if (mp3Files.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]Keine MP3-Dateien gefunden.[/]");
+            AnsiConsole.MarkupLine("[red]failed![/] No files to process.");
             return 0;
         }
+        AnsiConsole.MarkupLine($"[green]success![/] {mp3Files.Count} files found.");
 
-        var modelPath = await GetModel();
+        ModelDownloaderInteractor modelDownloader = new();
+        var modelPath = await modelDownloader.Invoke();
         
+        AnsiConsole.MarkupLine($"Using {Markup.Escape(modelPath)}");
         using var factory = WhisperFactory.FromPath(modelPath);
         var completed = 0;
         var skipped = 0;
@@ -76,7 +89,7 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
         var count = 0;
 
         await AnsiConsole.Status()
-            .StartAsync("Lade Whisper-Modell...", async ctx =>
+            .StartAsync("Transcribing ...", async ctx =>
             {
                 foreach (var mp3File in mp3Files)
                 {
@@ -107,75 +120,21 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
         AnsiConsole.MarkupLine($"[green]Fertig:[/] {completed} transkribiert, {skipped} übersprungen, {failed} fehlgeschlagen.");
         return failed == 0 ? 0 : 1;
     }
-
-    private static async Task<string> GetModel()
-    {
-        return await AnsiConsole.Status()
-            .StartAsync("Lade Whisper-Modell...", async ctx =>
-            {
-                var downloader = new WhisperGgmlDownloader(new HttpClient());
-
-                await using var stream = await downloader.GetGgmlModelAsync(
-                    GgmlType.LargeV3Turbo,
-                    QuantizationType.NoQuantization,
-                    CancellationToken.None);
-
-                var filePath = Path.Combine(Path.GetFullPath("."), "ggml-large-v3-turbo.bin");
-                
-                if (File.Exists(filePath))
-                    return filePath;
-                
-                await using var file = File.Create(filePath);
-                
-                var buffer = new byte[1024 * 1024];
-                long totalBytes = 0;
-
-                while (true)
-                {
-                    var read = await stream.ReadAsync(buffer);
-
-                    if (read == 0)
-                        break;
-
-                    await file.WriteAsync(buffer.AsMemory(0, read));
-
-                    totalBytes += read;
-
-                    ctx.Status($"Loading Whisper-Model ... {FormatBytes(totalBytes)}");
-                }
-
-                ctx.Status($"Done: {FormatBytes(totalBytes)}");
-                
-                return filePath;
-            });
-    }
-    
-    static string FormatBytes(long bytes)
-    {
-        string[] sizes = ["B", "KB", "MB", "GB"];
-
-        double size = bytes;
-        int order = 0;
-
-        while (size >= 1024 && order < sizes.Length - 1)
-        {
-            order++;
-            size /= 1024;
-        }
-
-        return $"{size:0.00} {sizes[order]}";
-    }
-    
+  
     private static async Task TranscribeAsync(WhisperFactory factory, string mp3File, string outputFile, string language, Action task)
     {
         var tempWav = Path.Combine(Path.GetTempPath(), $"whisper-{Guid.NewGuid():N}.wav");
         try
         {
-            await ConvertToWaveAsync(mp3File, tempWav);
-            using var processor = factory.CreateBuilder().WithLanguage(language).Build();
+            FfmpegConverterInteractor ffmpegConverterInteractor = new();
+            await ffmpegConverterInteractor.Convert(mp3File, tempWav);
+            await using var processor = factory.CreateBuilder().WithLanguage(language).Build();
             await using var wavStream = File.OpenRead(tempWav);
             await using var writer = new StreamWriter(outputFile, append: false);
 
+            var creationTime = File.GetCreationTime(mp3File).ToString("yyyy-MM-dd HH:mm:ss");
+            await writer.WriteAsync($"File created on {creationTime}\r\n\r\n");
+            
             await foreach (var segment in processor.ProcessAsync(wavStream))
             {
                 await writer.WriteAsync(segment.Text);
@@ -187,42 +146,5 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
             if (File.Exists(tempWav))
                 File.Delete(tempWav);
         }
-    }
-
-    private static async Task<bool> HasFfmpegAsync()
-    {
-        try
-        {
-            using var process = Process.Start(new ProcessStartInfo("ffmpeg", "-version")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            });
-            if (process is null) return false;
-            await process.WaitForExitAsync();
-            return process.ExitCode == 0;
-        }
-        catch (System.ComponentModel.Win32Exception)
-        {
-            return false;
-        }
-    }
-
-    private static async Task ConvertToWaveAsync(string inputFile, string outputFile)
-    {
-        using var process = Process.Start(new ProcessStartInfo("ffmpeg")
-        {
-            ArgumentList = { "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", inputFile, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", outputFile },
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        }) ?? throw new InvalidOperationException("ffmpeg konnte nicht gestartet werden.");
-
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"ffmpeg konnte die MP3 nicht konvertieren: {error.Trim()}");
     }
 }
