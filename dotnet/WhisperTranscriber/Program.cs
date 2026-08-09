@@ -161,7 +161,7 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
             
             await foreach (var segment in processor.ProcessAsync(wavStream))
             {
-                await writer.WriteAsync(segment.Text);
+                await writer.WriteAsync(segment.Text + Environment.NewLine);
                 task.Invoke();
             }
         }
