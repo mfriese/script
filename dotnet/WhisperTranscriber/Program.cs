@@ -8,6 +8,7 @@ using Whisper.net;
 using Whisper.net.Ggml;
 using WhisperTranscriber.Extensions;
 using WhisperTranscriber.Interactors;
+using WhisperTranscriber.Interactors.Directories;
 
 var app = new CommandApp<TranscribeCommand>();
 app.Configure(config =>
@@ -15,17 +16,17 @@ app.Configure(config =>
     config.SetApplicationName("whisper-transcribe");
     config.SetApplicationVersion("1.0.0");
     config.ValidateExamples();
-    config.AddExample("/Volumes/Audio");
-    config.AddExample("./aufnahmen", "--recursive", "--overwrite");
+    config.AddExample("--recursive", "--overwrite");
+    config.AddExample("--recursive", "--language", "de", "--directory", "./photos/2024");
 });
 
 return await app.RunAsync(args);
 
 sealed class TranscribeSettings : CommandSettings
 {
-    [CommandArgument(0, "<directory>")]
+    [CommandOption("-d|--directory <DIRECTORY>")]
     [Description("Verzeichnis mit MP3-Dateien.")]
-    public string Directory { get; init; } = string.Empty;
+    public string Directory { get; set; } = string.Empty;
 
     [CommandOption("-l|--language <LANGUAGE>")]
     [DefaultValue("de")]
@@ -39,14 +40,6 @@ sealed class TranscribeSettings : CommandSettings
     [CommandOption("-o|--overwrite")]
     [Description("Überschreibt bereits vorhandene TXT-Dateien.")]
     public bool Overwrite { get; init; }
-
-    public override ValidationResult Validate()
-    {
-        if (string.IsNullOrWhiteSpace(Directory) || !System.IO.Directory.Exists(Directory))
-            return ValidationResult.Error($"Das Verzeichnis '{Directory}' existiert nicht.");
-
-        return ValidationResult.Success();
-    }
 }
 
 sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
@@ -56,9 +49,23 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
         AnsiConsole.Write(new FigletText("Whisper Trans").LeftJustified().Color(Color.Yellow));
         AnsiConsole.Write(new Rule("[bold]Now setting up [/]").Justify(Justify.Left));
         
-        AnsiConsole.Write(new JsonText(System.Text.Json.JsonSerializer.Serialize(settings)));
+        AnsiConsole.MarkupLine("[yellow]No directory configured. Please choose one [/] ... ");
+        PathSelectorInteractor pathSelector = new();
+        settings.Directory = pathSelector.Perform();
+
+        if (!Directory.Exists(settings.Directory))
+        {
+            AnsiConsole.MarkupLine("[red]failed![/] Please select a proper directory.");
+            return 2;
+        }
+        AnsiConsole.MarkupLine("[green]success![/]");
         
-        AnsiConsole.MarkupLine("[yellow]Check ffmpeg[/] ... ");
+        AnsiConsole.Write(new Panel(new JsonText(System.Text.Json.JsonSerializer.Serialize(settings)))
+            .Header("[bold]Settings[/]")
+            .BorderColor(Color.Grey)
+            .Expand());
+        
+        AnsiConsole.Markup("[yellow]Check ffmpeg[/] ... ");
         FfmpegExistsInteractor ffmpegExists = new();
         if (!await ffmpegExists.Invoke())
         {
@@ -70,7 +77,7 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
         AnsiConsole.Markup("[yellow]Finding input[/] ... ");
         var searchOption = settings.Recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         var mp3Files = System.IO.Directory.EnumerateFiles(settings.Directory, "*", searchOption)
-            .Where(path => Regex.IsMatch(Path.GetExtension(path), @"\.mp[34]"))
+            .Where(path => Regex.IsMatch(Path.GetExtension(path), @"\.(mp3|mp4|wav)$"))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -81,10 +88,11 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
         }
         AnsiConsole.MarkupLine($"[green]success![/] {mp3Files.Count} files found.");
 
+        AnsiConsole.Markup("[yellow]Finding model[/] ... ");
         ModelDownloaderInteractor modelDownloader = new();
         var modelPath = await modelDownloader.Invoke();
+        AnsiConsole.MarkupLine($"[green]success![/] {modelPath}");
         
-        AnsiConsole.MarkupLine($"Using {Markup.Escape(modelPath)}");
         using var factory = WhisperFactory.FromPath(modelPath);
         var completed = 0;
         var skipped = 0;
@@ -133,6 +141,8 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
     private static async Task TranscribeAsync(WhisperFactory factory, string mp3File, string outputFile, string language, Action task)
     {
         var tempWav = Path.Combine(Path.GetTempPath(), $"whisper-{Guid.NewGuid():N}.wav");
+        ParseCreationDateInteractor filenameParser = new();
+        
         try
         {
             FfmpegConverterInteractor ffmpegConverterInteractor = new();
@@ -141,8 +151,13 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
             await using var wavStream = File.OpenRead(tempWav);
             await using var writer = new StreamWriter(outputFile, append: false);
 
-            var creationTime = File.GetCreationTime(mp3File).ToString("yyyy-MM-dd HH:mm:ss");
-            await writer.WriteAsync($"File created on {creationTime}\r\n\r\n");
+            if (!filenameParser.Invoke(mp3File, out var createdAt))
+            {
+                createdAt = File.GetCreationTime(mp3File);
+            }
+            
+            var creationTime = createdAt.ToString("yyyy-MM-dd HH:mm:ss");
+            await writer.WriteAsync($"Created on {creationTime}\r\n\r\n");
             
             await foreach (var segment in processor.ProcessAsync(wavStream))
             {
