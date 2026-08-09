@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Spectre.Console;
 using Spectre.Console.Cli;
+using Spectre.Console.Json;
 using Whisper.net;
 using Whisper.net.Ggml;
 using WhisperTranscriber.Extensions;
@@ -55,7 +56,9 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
         AnsiConsole.Write(new FigletText("Whisper Trans").LeftJustified().Color(Color.Yellow));
         AnsiConsole.Write(new Rule("[bold]Now setting up [/]").Justify(Justify.Left));
         
-        AnsiConsole.Markup("[yellow]Check ffmpeg[/] ... ");
+        AnsiConsole.Write(new JsonText(System.Text.Json.JsonSerializer.Serialize(settings)));
+        
+        AnsiConsole.MarkupLine("[yellow]Check ffmpeg[/] ... ");
         FfmpegExistsInteractor ffmpegExists = new();
         if (!await ffmpegExists.Invoke())
         {
@@ -96,7 +99,6 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
                     var lines = 0;
                     count++;
                     var outputFile = Path.ChangeExtension(mp3File, ".txt");
-                    Action task = () => ctx.Status($"[green]Progress[/]: File {count} of {mp3Files.Count}: [yellow]{Markup.Escape(Path.GetFileName(mp3File))}[/] found {++lines} lines ..."); 
 
                     if (File.Exists(outputFile) && !settings.Overwrite)
                     {
@@ -106,14 +108,21 @@ sealed class TranscribeCommand : AsyncCommand<TranscribeSettings>
 
                     try
                     {
-                        await TranscribeAsync(factory, mp3File, outputFile, settings.Language, task);
+                        await TranscribeAsync(factory, mp3File, outputFile, settings.Language, Task);
                         completed++;
                     }
                     catch (Exception exception)
                     {
                         failed++;
-                        AnsiConsole.MarkupLine($"[red]Fehler bei {Markup.Escape(mp3File)}:[/] {Markup.Escape(exception.Message)}");
+                        AnsiConsole.MarkupLine($"[red]Fehler bei {Markup.Escape(mp3File)}:[/] " + 
+                                               $"{Markup.Escape(exception.Message)}");
                     }
+
+                    continue;
+
+                    void Task() => ctx.Status($"[green]Progress[/]: File {count} of {mp3Files.Count}: " +
+                                              $"[yellow]{Markup.Escape(Path.GetFileName(mp3File))}[/] " +
+                                              $"found {++lines} lines ...");
                 }
             });
 
