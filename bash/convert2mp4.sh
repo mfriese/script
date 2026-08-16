@@ -53,7 +53,7 @@ caffeinate -i -s ffmpeg -y -i "$INPUT" \
     "$OUTPUT"
 
 # Cleanup
-rm -f "${BASENAME}-0.log" "${BASENAME}-0.log.mbtree"
+rm -f "${BASENAME}-0.log" "${BASENAME}-0.log.mbtree" "$INPUT"
 
 echo "Fertig: $OUTPUT"
 
