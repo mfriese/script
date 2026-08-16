@@ -5,7 +5,7 @@
     Konvertiert alle Dateien einer Erweiterung rekursiv nach MP4.
 
 .DESCRIPTION
-    Startet convert2mp4.sh in parallelen Batches. Die Anzahl gleichzeitig
+    Startet convert2mp4.ps1 in parallelen Batches. Die Anzahl gleichzeitig
     laufender Konvertierungen wird mit ThrottleLimit begrenzt.
 #>
 [CmdletBinding()]
@@ -32,15 +32,10 @@ if ([string]::IsNullOrWhiteSpace($normalizedExtension)) {
 }
 
 $rootPath = (Resolve-Path -LiteralPath $Path).Path
-$workerScript = Join-Path -Path $PSScriptRoot -ChildPath 'convert2mp4.sh'
+$workerScript = Join-Path -Path $PSScriptRoot -ChildPath 'convert2mp4.ps1'
 
 if (-not (Test-Path -LiteralPath $workerScript -PathType Leaf)) {
     throw "Konvertierungsskript nicht gefunden: $workerScript"
-}
-
-$bash = Get-Command -Name bash -CommandType Application -ErrorAction SilentlyContinue
-if ($null -eq $bash) {
-    throw 'Bash wurde nicht gefunden. convert2mp4.sh benötigt eine Bash-Laufzeitumgebung.'
 }
 
 $files = @(Get-ChildItem -LiteralPath $rootPath -Recurse -File |
@@ -84,13 +79,10 @@ function Complete-ConversionBatch {
 
 foreach ($file in $files) {
     $jobs.Add((Start-Job -Name $file.FullName -ScriptBlock {
-        param($BashPath, $WorkerPath, $InputFile)
+        param($WorkerPath, $InputFile)
 
-        & $BashPath $WorkerPath $InputFile
-        if ($LASTEXITCODE -ne 0) {
-            throw "Konvertierung fehlgeschlagen (Exit-Code $LASTEXITCODE): $InputFile"
-        }
-    } -ArgumentList $bash.Source, $workerScript, $file.FullName))
+        & $WorkerPath -InputFile $InputFile
+    } -ArgumentList $workerScript, $file.FullName))
 
     if ($jobs.Count -ge $ThrottleLimit) {
         Complete-ConversionBatch -Batch $jobs
