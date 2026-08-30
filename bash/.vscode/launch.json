@@ -9,7 +9,11 @@
             "type": "PowerShell",
             "request": "launch",
             "script": "${file}",
-            "args": ["mkv", "-Path", "${workspaceFolder}"]
+            // "args": ["mkv", "-Path", "${workspaceFolder}"]
+            "args": [
+                "-MakeMkv", "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+                "-Root", "/Volumes/VeryBig/media/Rips/"
+            ]
         }
     ]
 }

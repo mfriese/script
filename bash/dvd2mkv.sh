@@ -9,4 +9,7 @@ find "$ROOT" -type d -name VIDEO_TS | while read -r vts; do
   echo "==> Verarbeite: $dir"
 
   "$MAKEMKV" mkv "file:$vts" all "$dir"
+  
+  echo "==> MakeMKV erfolgreich, lösche: $vts"
+  rm -rf -- "$vts"
 done

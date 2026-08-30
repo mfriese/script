@@ -1,0 +1,17 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct Material {
+    float4 terrainColor;
+    float4 fogColor;
+};
+
+struct FragmentInput {
+    float4 position [[position]];
+    float3 worldPosition [[user(locn0)]];
+};
+
+fragment float4 terrain_fragment(FragmentInput input [[stage_in]], constant Material& material [[buffer(0)]]) {
+    const float fogAmount = atan(length(input.worldPosition) * .1) * 2.0 / M_PI_F;
+    return float4(mix(material.terrainColor.rgb, material.fogColor.rgb, fogAmount), material.terrainColor.a);
+}
