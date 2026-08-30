@@ -14,6 +14,7 @@ namespace {
 struct Vec3 { float x, y, z; };
 struct Mat4 { float m[16]; };
 struct Material { float terrain[4]; float fog[4]; };
+struct GpuVertex { float x, y, z; };
 
 [[noreturn]] void fail(const char* what) { throw std::runtime_error(std::string(what) + ": " + SDL_GetError()); }
 std::filesystem::path assetPath(const char* path) { return std::filesystem::path(SDL_GetBasePath()) / path; }
@@ -52,7 +53,7 @@ void upload(SDL_GPUDevice* d, SDL_GPUBuffer* dst, const void* data, Uint32 bytes
 TerrainRenderer::TerrainRenderer(SDL_Window& window, const TerrainMesh& mesh) : window_(&window), vertexCount_(static_cast<Uint32>(mesh.vertices().size())) {
     device_=SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL,true,"metal"); if(!device_) fail("SDL_CreateGPUDevice");
     if(!SDL_ClaimWindowForGPUDevice(device_,window_)) fail("GPU-Fenster zuweisen");
-    createPipelines(); uploadMesh(mesh); loadHeightmap();
+    loadHeightmap(); createPipelines(); uploadMesh(mesh);
     SDL_GPUSamplerCreateInfo info{}; info.min_filter=SDL_GPU_FILTER_LINEAR; info.mag_filter=SDL_GPU_FILTER_LINEAR; info.address_mode_u=SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE; info.address_mode_v=SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
     sampler_=SDL_CreateGPUSampler(device_,&info); if(!sampler_) fail("SDL_CreateGPUSampler");
 }
@@ -64,8 +65,8 @@ TerrainRenderer::~TerrainRenderer() {
 }
 
 void TerrainRenderer::createPipelines() {
-    SDL_GPUShader* vs=shader(device_,"terrain.vert","terrain_vertex",SDL_GPU_SHADERSTAGE_VERTEX,1,1); SDL_GPUShader* fs=shader(device_,"terrain.frag","terrain_fragment",SDL_GPU_SHADERSTAGE_FRAGMENT,0,1);
-    SDL_GPUVertexBufferDescription buffer{0,sizeof(TerrainVertex),SDL_GPU_VERTEXINPUTRATE_VERTEX,0}; SDL_GPUVertexAttribute attribute{0,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,0};
+    SDL_GPUShader* vs=shader(device_,"terrain.vert","terrain_vertex",SDL_GPU_SHADERSTAGE_VERTEX,0,1); SDL_GPUShader* fs=shader(device_,"terrain.frag","terrain_fragment",SDL_GPU_SHADERSTAGE_FRAGMENT,0,1);
+    SDL_GPUVertexBufferDescription buffer{0,sizeof(GpuVertex),SDL_GPU_VERTEXINPUTRATE_VERTEX,0}; SDL_GPUVertexAttribute attribute{0,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,0};
     SDL_GPUColorTargetDescription target{SDL_GetGPUSwapchainTextureFormat(device_,window_),{}};
     SDL_GPUGraphicsPipelineCreateInfo info{}; info.vertex_shader=vs; info.fragment_shader=fs; info.vertex_input_state={&buffer,1,&attribute,1}; info.primitive_type=SDL_GPU_PRIMITIVETYPE_TRIANGLELIST; info.target_info={&target,1,SDL_GPU_TEXTUREFORMAT_INVALID,false};
     fillPipeline_=SDL_CreateGPUGraphicsPipeline(device_,&info); info.rasterizer_state.fill_mode=SDL_GPU_FILLMODE_LINE; wirePipeline_=SDL_CreateGPUGraphicsPipeline(device_,&info);
@@ -73,7 +74,14 @@ void TerrainRenderer::createPipelines() {
 }
 
 void TerrainRenderer::uploadMesh(const TerrainMesh& mesh) {
-    SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX,static_cast<Uint32>(mesh.vertices().size()*sizeof(TerrainVertex))}; vertexBuffer_=SDL_CreateGPUBuffer(device_,&info); if(!vertexBuffer_) fail("Terrain-Buffer"); upload(device_,vertexBuffer_,mesh.vertices().data(),info.size);
+    std::vector<GpuVertex> vertices;
+    vertices.reserve(mesh.vertices().size());
+    for (const TerrainVertex& vertex : mesh.vertices()) {
+        const float x = (vertex.u - .5f) * 52.f;
+        const float z = -vertex.v * 84.f;
+        vertices.push_back({x, terrainHeightAt(x, z), z});
+    }
+    SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX,static_cast<Uint32>(vertices.size()*sizeof(GpuVertex))}; vertexBuffer_=SDL_CreateGPUBuffer(device_,&info); if(!vertexBuffer_) fail("Terrain-Buffer"); upload(device_,vertexBuffer_,vertices.data(),info.size);
 }
 
 void TerrainRenderer::loadHeightmap() {
@@ -94,8 +102,8 @@ void TerrainRenderer::loadHeightmap() {
 
 float TerrainRenderer::terrainHeightAt(float worldX, float worldZ) const {
     // Gleiche 100×100-m-Abbildung wie im Vertex-Shader; bilineare Abtastung.
-    const float u = std::clamp(worldX / 100.f + .5f, 0.f, 1.f);
-    const float v = std::clamp(worldZ / 100.f + .5f, 0.f, 1.f);
+    const float u = std::clamp(worldX / 52.f + .5f, 0.f, 1.f);
+    const float v = std::clamp(-worldZ / 84.f, 0.f, 1.f);
     const int x = std::clamp(static_cast<int>(u * (heightmapWidth_ - 1)), 0, heightmapWidth_ - 1);
     const int z = std::clamp(static_cast<int>(v * (heightmapHeight_ - 1)), 0, heightmapHeight_ - 1);
     return heightSamples_[z * heightmapWidth_ + x];
@@ -104,19 +112,18 @@ float TerrainRenderer::terrainHeightAt(float worldX, float worldZ) const {
 void TerrainRenderer::update(float deltaSeconds) {
     // Langsamer, gleichmäßiger Vorwärtsflug ausschließlich entlang der Z-Achse.
     flightDistance_ += 4.f * deltaSeconds;
-    if (flightDistance_ > 80.f) flightDistance_ -= 80.f;
+    if (flightDistance_ > 70.f) flightDistance_ -= 70.f;
 }
 
 void TerrainRenderer::render() {
     SDL_GPUCommandBuffer* commands=SDL_AcquireGPUCommandBuffer(device_); SDL_GPUTexture* backbuffer=nullptr; Uint32 width{},height{};
     if(!SDL_WaitAndAcquireGPUSwapchainTexture(commands,window_,&backbuffer,&width,&height)) fail("Swapchain"); if(!backbuffer) { SDL_SubmitGPUCommandBuffer(commands); return; }
     SDL_GPUColorTargetInfo target{}; target.texture=backbuffer; target.clear_color={.208f,.208f,.275f,1}; target.load_op=SDL_GPU_LOADOP_CLEAR; target.store_op=SDL_GPU_STOREOP_STORE;
-    SDL_GPURenderPass* pass=SDL_BeginGPURenderPass(commands,&target,1,nullptr); SDL_GPUBufferBinding buffer{vertexBuffer_,0}; SDL_GPUTextureSamplerBinding texture{heightmap_,sampler_}; SDL_BindGPUVertexBuffers(pass,0,&buffer,1); SDL_BindGPUVertexSamplers(pass,0,&texture,1);
-    const float helicopterZ = -42.f + flightDistance_;
-    // Der höchste Terrainwert ist 18 m.  Diese Beobachtungskamera bleibt
-    // garantiert darüber und blickt entlang der +Z-Flugachse auf den Canyon.
-    const Vec3 eye{0.f, 32.f, helicopterZ - 14.f};
-    const Vec3 lookAt{0.f, terrainHeightAt(0.f, helicopterZ + 10.f), helicopterZ + 10.f};
+    SDL_GPURenderPass* pass=SDL_BeginGPURenderPass(commands,&target,1,nullptr); SDL_GPUBufferBinding buffer{vertexBuffer_,0}; SDL_BindGPUVertexBuffers(pass,0,&buffer,1);
+    const float flightZ = -4.f - flightDistance_;
+    // main.lua erzeugt das Terrain von z=0 nach z=-84: Flug ausschließlich -Z.
+    const Vec3 eye{0.f, 32.f, flightZ + 12.f};
+    const Vec3 lookAt{0.f, terrainHeightAt(0.f, flightZ - 10.f), flightZ - 10.f};
     const Mat4 viewProjection=camera(eye, lookAt, static_cast<float>(width)/height); SDL_PushGPUVertexUniformData(commands,0,&viewProjection,sizeof(viewProjection));
     const Material fill{{.565f,.404f,.463f,1},{.208f,.208f,.275f,1}}, wire{{1,1,1,1},{.208f,.208f,.275f,1}};
     SDL_BindGPUGraphicsPipeline(pass,fillPipeline_); SDL_PushGPUFragmentUniformData(commands,0,&fill,sizeof(fill)); SDL_DrawGPUPrimitives(pass,vertexCount_,1,0,0);

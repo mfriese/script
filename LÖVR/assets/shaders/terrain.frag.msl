@@ -13,5 +13,9 @@ struct FragmentInput {
 
 fragment float4 terrain_fragment(FragmentInput input [[stage_in]], constant Material& material [[buffer(0)]]) {
     const float fogAmount = atan(length(input.worldPosition) * .1) * 2.0 / M_PI_F;
-    return float4(mix(material.terrainColor.rgb, material.fogColor.rgb, fogAmount), material.terrainColor.a);
+    // Sichtbarer Nachweis der aus dem Alpha-Kanal erzeugten Vertexhöhe:
+    // niedrige Canyonböden sind dunkel, hohe Ränder deutlich heller.
+    const float heightFactor = clamp(input.worldPosition.y / 18.0, 0.0, 1.0);
+    const float3 terrainColor = mix(material.terrainColor.rgb * .38, material.terrainColor.rgb * 1.35, heightFactor);
+    return float4(mix(terrainColor, material.fogColor.rgb, fogAmount), material.terrainColor.a);
 }
