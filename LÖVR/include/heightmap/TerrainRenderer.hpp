@@ -17,7 +17,7 @@ public:
     TerrainRenderer& operator=(const TerrainRenderer&) = delete;
 
     void render();
-    void update(float deltaSeconds);
+    void update(float deltaSeconds, float lateralInput);
 
 private:
     void createPipelines();
@@ -37,6 +37,7 @@ private:
     Uint32 depthWidth_{}, depthHeight_{};
     Uint32 vertexCount_{};
     float flightDistance_{0.f};
+    float lateralPosition_{0.f};
     std::vector<float> heightSamples_;
     int heightmapWidth_{}, heightmapHeight_{};
 };

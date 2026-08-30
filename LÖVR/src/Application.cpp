@@ -28,7 +28,9 @@ int Application::run() {
                         (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)) running = false;
                 }
                 const Uint64 now = SDL_GetTicks();
-                renderer.update(std::min(.05f, static_cast<float>(now - previousTicks) / 1000.f));
+                const bool* keys = SDL_GetKeyboardState(nullptr);
+                const float lateralInput = (keys[SDL_SCANCODE_RIGHT] ? 1.f : 0.f) - (keys[SDL_SCANCODE_LEFT] ? 1.f : 0.f);
+                renderer.update(std::min(.05f, static_cast<float>(now - previousTicks) / 1000.f), lateralInput);
                 previousTicks = now;
                 renderer.render();
             }

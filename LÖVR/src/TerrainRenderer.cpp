@@ -116,10 +116,11 @@ void TerrainRenderer::ensureDepthBuffer(Uint32 width, Uint32 height) {
     depthBuffer_=SDL_CreateGPUTexture(device_, &info); if (!depthBuffer_) fail("Depth-Buffer"); depthWidth_=width; depthHeight_=height;
 }
 
-void TerrainRenderer::update(float deltaSeconds) {
+void TerrainRenderer::update(float deltaSeconds, float lateralInput) {
     // Langsamer, gleichmäßiger Vorwärtsflug ausschließlich entlang der Z-Achse.
     flightDistance_ += 4.f * deltaSeconds;
     if (flightDistance_ > 145.f) flightDistance_ -= 145.f;
+    lateralPosition_ = std::clamp(lateralPosition_ + lateralInput * 7.f * deltaSeconds, -18.f, 18.f);
 }
 
 void TerrainRenderer::render() {
@@ -131,8 +132,9 @@ void TerrainRenderer::render() {
     SDL_GPURenderPass* pass=SDL_BeginGPURenderPass(commands,&target,1,&depth); SDL_GPUBufferBinding buffer{vertexBuffer_,0}; SDL_BindGPUVertexBuffers(pass,0,&buffer,1);
     const float flightZ = -4.f - flightDistance_;
     // main.lua erzeugt das Terrain von z=0 nach z=-84: Flug ausschließlich -Z.
-    const Vec3 eye{0.f, 32.f, flightZ + 12.f};
-    const Vec3 lookAt{0.f, terrainHeightAt(0.f, flightZ - 10.f), flightZ - 10.f};
+    // Feste, niedrige Cockpitkamera: unabhängig von Heightmap und Flugbahn.
+    const Vec3 eye{lateralPosition_, 7.f, flightZ + 3.f};
+    const Vec3 lookAt{lateralPosition_, 4.f, flightZ - 18.f};
     const Mat4 viewProjection=camera(eye, lookAt, static_cast<float>(width)/height); SDL_PushGPUVertexUniformData(commands,0,&viewProjection,sizeof(viewProjection));
     const Material fill{{.565f,.404f,.463f,1},{.208f,.208f,.275f,1}}, wire{{1,1,1,1},{.208f,.208f,.275f,1}};
     SDL_BindGPUGraphicsPipeline(pass,fillPipeline_); SDL_PushGPUFragmentUniformData(commands,0,&fill,sizeof(fill)); SDL_DrawGPUPrimitives(pass,vertexCount_,1,0,0); SDL_EndGPURenderPass(pass);
