@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <vector>
 
 #include "heightmap/TerrainMesh.hpp"
 
@@ -16,11 +17,13 @@ public:
     TerrainRenderer& operator=(const TerrainRenderer&) = delete;
 
     void render();
+    void update(float deltaSeconds);
 
 private:
     void createPipelines();
     void uploadMesh(const TerrainMesh& mesh);
     void loadHeightmap();
+    [[nodiscard]] float terrainHeightAt(float worldX, float worldZ) const;
 
     SDL_Window* window_{};
     SDL_GPUDevice* device_{};
@@ -30,6 +33,9 @@ private:
     SDL_GPUTexture* heightmap_{};
     SDL_GPUSampler* sampler_{};
     Uint32 vertexCount_{};
+    float flightDistance_{0.f};
+    std::vector<float> heightSamples_;
+    int heightmapWidth_{}, heightmapHeight_{};
 };
 
 } // namespace heightmap

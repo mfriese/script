@@ -22,8 +22,8 @@ float dot(Vec3 a, Vec3 b) { return a.x*b.x+a.y*b.y+a.z*b.z; }
 Vec3 cross(Vec3 a, Vec3 b) { return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x}; }
 Vec3 norm(Vec3 a) { float l=std::sqrt(dot(a,a)); return {a.x/l,a.y/l,a.z/l}; }
 Mat4 mul(const Mat4& a, const Mat4& b) { Mat4 r{}; for(int c=0;c<4;++c) for(int row=0;row<4;++row) for(int k=0;k<4;++k) r.m[c*4+row]+=a.m[k*4+row]*b.m[c*4+k]; return r; }
-Mat4 camera(float aspect) {
-    const Vec3 eye{70,55,-70}, forward=norm(sub({0,0,0},eye)), right=norm(cross({0,1,0},forward)), up=cross(forward,right);
+Mat4 camera(Vec3 eye, Vec3 target, float aspect) {
+    const Vec3 forward=norm(sub(target,eye)), right=norm(cross({0,1,0},forward)), up=cross(forward,right);
     Mat4 view{{right.x,up.x,forward.x,0,right.y,up.y,forward.y,0,right.z,up.z,forward.z,0,-dot(right,eye),-dot(up,eye),-dot(forward,eye),1}};
     float ys=1.f/std::tan(.5f), xs=ys/aspect;
     Mat4 projection{{xs,0,0,0,0,ys,0,0,0,0,300.f/299.9f,1,0,0,-30.f/299.9f,0}};
@@ -77,12 +77,34 @@ void TerrainRenderer::uploadMesh(const TerrainMesh& mesh) {
 }
 
 void TerrainRenderer::loadHeightmap() {
-    SDL_Surface* input=IMG_Load(assetPath("assets/canyon_heightmap.png").string().c_str()); if(!input) fail("Canyon-Heightmap laden");
+    SDL_Surface* input=IMG_Load(assetPath("assets/heightmap.png").string().c_str()); if(!input) fail("Heightmap laden");
     SDL_Surface* image=SDL_ConvertSurface(input,SDL_PIXELFORMAT_RGBA32); SDL_DestroySurface(input); if(!image) fail("Heightmap konvertieren");
+    heightmapWidth_ = image->w;
+    heightmapHeight_ = image->h;
+    heightSamples_.resize(static_cast<size_t>(heightmapWidth_) * heightmapHeight_);
+    for (int y = 0; y < heightmapHeight_; ++y) {
+        const auto* row = static_cast<const Uint8*>(image->pixels) + y * image->pitch;
+        for (int x = 0; x < heightmapWidth_; ++x) heightSamples_[y * heightmapWidth_ + x] = row[x * 4 + 3] / 255.f * 18.f;
+    }
     SDL_GPUTextureCreateInfo info{}; info.type=SDL_GPU_TEXTURETYPE_2D; info.format=SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM; info.usage=SDL_GPU_TEXTUREUSAGE_SAMPLER; info.width=image->w; info.height=image->h; info.layer_count_or_depth=1; info.num_levels=1; info.sample_count=SDL_GPU_SAMPLECOUNT_1;
     heightmap_=SDL_CreateGPUTexture(device_,&info); if(!heightmap_) fail("Heightmap-Textur"); const Uint32 bytes=image->pitch*image->h;
     SDL_GPUTransferBufferCreateInfo uploadInfo{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,bytes}; SDL_GPUTransferBuffer* transfer=SDL_CreateGPUTransferBuffer(device_,&uploadInfo); void* p=SDL_MapGPUTransferBuffer(device_,transfer,false); std::memcpy(p,image->pixels,bytes); SDL_UnmapGPUTransferBuffer(device_,transfer);
     SDL_GPUCommandBuffer* c=SDL_AcquireGPUCommandBuffer(device_); SDL_GPUCopyPass* pass=SDL_BeginGPUCopyPass(c); SDL_GPUTextureTransferInfo from{transfer,0,static_cast<Uint32>(image->pitch/4),static_cast<Uint32>(image->h)}; SDL_GPUTextureRegion to{heightmap_,0,0,0,0,info.width,info.height,1}; SDL_UploadToGPUTexture(pass,&from,&to,false); SDL_EndGPUCopyPass(pass); SDL_DestroySurface(image); if(!SDL_SubmitGPUCommandBuffer(c)) fail("Heightmap hochladen"); SDL_ReleaseGPUTransferBuffer(device_,transfer);
+}
+
+float TerrainRenderer::terrainHeightAt(float worldX, float worldZ) const {
+    // Gleiche 100×100-m-Abbildung wie im Vertex-Shader; bilineare Abtastung.
+    const float u = std::clamp(worldX / 100.f + .5f, 0.f, 1.f);
+    const float v = std::clamp(worldZ / 100.f + .5f, 0.f, 1.f);
+    const int x = std::clamp(static_cast<int>(u * (heightmapWidth_ - 1)), 0, heightmapWidth_ - 1);
+    const int z = std::clamp(static_cast<int>(v * (heightmapHeight_ - 1)), 0, heightmapHeight_ - 1);
+    return heightSamples_[z * heightmapWidth_ + x];
+}
+
+void TerrainRenderer::update(float deltaSeconds) {
+    // Langsamer, gleichmäßiger Vorwärtsflug ausschließlich entlang der Z-Achse.
+    flightDistance_ += 4.f * deltaSeconds;
+    if (flightDistance_ > 80.f) flightDistance_ -= 80.f;
 }
 
 void TerrainRenderer::render() {
@@ -90,7 +112,12 @@ void TerrainRenderer::render() {
     if(!SDL_WaitAndAcquireGPUSwapchainTexture(commands,window_,&backbuffer,&width,&height)) fail("Swapchain"); if(!backbuffer) { SDL_SubmitGPUCommandBuffer(commands); return; }
     SDL_GPUColorTargetInfo target{}; target.texture=backbuffer; target.clear_color={.208f,.208f,.275f,1}; target.load_op=SDL_GPU_LOADOP_CLEAR; target.store_op=SDL_GPU_STOREOP_STORE;
     SDL_GPURenderPass* pass=SDL_BeginGPURenderPass(commands,&target,1,nullptr); SDL_GPUBufferBinding buffer{vertexBuffer_,0}; SDL_GPUTextureSamplerBinding texture{heightmap_,sampler_}; SDL_BindGPUVertexBuffers(pass,0,&buffer,1); SDL_BindGPUVertexSamplers(pass,0,&texture,1);
-    const Mat4 viewProjection=camera(static_cast<float>(width)/height); SDL_PushGPUVertexUniformData(commands,0,&viewProjection,sizeof(viewProjection));
+    const float helicopterZ = -42.f + flightDistance_;
+    // Der höchste Terrainwert ist 18 m.  Diese Beobachtungskamera bleibt
+    // garantiert darüber und blickt entlang der +Z-Flugachse auf den Canyon.
+    const Vec3 eye{0.f, 32.f, helicopterZ - 14.f};
+    const Vec3 lookAt{0.f, terrainHeightAt(0.f, helicopterZ + 10.f), helicopterZ + 10.f};
+    const Mat4 viewProjection=camera(eye, lookAt, static_cast<float>(width)/height); SDL_PushGPUVertexUniformData(commands,0,&viewProjection,sizeof(viewProjection));
     const Material fill{{.565f,.404f,.463f,1},{.208f,.208f,.275f,1}}, wire{{1,1,1,1},{.208f,.208f,.275f,1}};
     SDL_BindGPUGraphicsPipeline(pass,fillPipeline_); SDL_PushGPUFragmentUniformData(commands,0,&fill,sizeof(fill)); SDL_DrawGPUPrimitives(pass,vertexCount_,1,0,0);
     SDL_BindGPUGraphicsPipeline(pass,wirePipeline_); SDL_PushGPUFragmentUniformData(commands,0,&wire,sizeof(wire)); SDL_DrawGPUPrimitives(pass,vertexCount_,1,0,0); SDL_EndGPURenderPass(pass);

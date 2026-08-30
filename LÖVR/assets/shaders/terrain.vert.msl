@@ -20,8 +20,8 @@ vertex VertexOutput terrain_vertex(
     sampler heightmapSampler [[sampler(0)]],
     constant Camera& camera [[buffer(0)]]) {
     VertexOutput output;
-    // Die Graustufe der Canyon-Heightmap definiert die Gelände-Höhe.
-    const float height = heightmap.sample(heightmapSampler, input.uv, level(0)).r * 22.0;
+    // Wie in main.lua: Nur der Alpha-Kanal definiert die Gelände-Höhe.
+    const float height = heightmap.sample(heightmapSampler, input.uv, level(0)).a * 18.0;
     const float3 world = float3((input.uv.x - .5) * 100.0, height, (input.uv.y - .5) * 100.0);
     output.position = camera.clipFromWorld * float4(world, 1.0);
     output.worldPosition = world;

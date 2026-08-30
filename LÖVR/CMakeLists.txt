@@ -30,8 +30,8 @@ target_link_libraries(heightmap_sdl3 PRIVATE SDL3::SDL3 SDL3_image::SDL3_image w
 add_custom_target(runtime_assets ALL
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:heightmap_sdl3>/assets"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${CMAKE_CURRENT_SOURCE_DIR}/assets/canyon_heightmap.png"
-          "$<TARGET_FILE_DIR:heightmap_sdl3>/assets/canyon_heightmap.png"
+          "${CMAKE_CURRENT_SOURCE_DIR}/heightmap.png"
+          "$<TARGET_FILE_DIR:heightmap_sdl3>/assets/heightmap.png"
   COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:heightmap_sdl3>/assets/shaders"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/terrain.vert.msl"

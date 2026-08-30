@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdio>
+#include <algorithm>
 #include <stdexcept>
 
 namespace heightmap {
@@ -19,12 +20,16 @@ int Application::run() {
             TerrainMesh terrain(128);
             TerrainRenderer renderer(*window, terrain);
             bool running = true;
+            Uint64 previousTicks = SDL_GetTicks();
             while (running) {
                 SDL_Event event;
                 while (SDL_PollEvent(&event)) {
                     if (event.type == SDL_EVENT_QUIT ||
                         (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE)) running = false;
                 }
+                const Uint64 now = SDL_GetTicks();
+                renderer.update(std::min(.05f, static_cast<float>(now - previousTicks) / 1000.f));
+                previousTicks = now;
                 renderer.render();
             }
         }
