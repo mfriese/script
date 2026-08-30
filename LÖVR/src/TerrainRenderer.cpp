@@ -59,7 +59,7 @@ TerrainRenderer::TerrainRenderer(SDL_Window& window, const TerrainMesh& mesh) : 
 }
 
 TerrainRenderer::~TerrainRenderer() {
-    SDL_ReleaseGPUSampler(device_,sampler_); SDL_ReleaseGPUTexture(device_,heightmap_); SDL_ReleaseGPUBuffer(device_,vertexBuffer_);
+    SDL_ReleaseGPUSampler(device_,sampler_); SDL_ReleaseGPUTexture(device_,heightmap_); SDL_ReleaseGPUTexture(device_,depthBuffer_); SDL_ReleaseGPUBuffer(device_,vertexBuffer_);
     SDL_ReleaseGPUGraphicsPipeline(device_,wirePipeline_); SDL_ReleaseGPUGraphicsPipeline(device_,fillPipeline_);
     if(device_) { SDL_ReleaseWindowFromGPUDevice(device_,window_); SDL_DestroyGPUDevice(device_); }
 }
@@ -68,7 +68,7 @@ void TerrainRenderer::createPipelines() {
     SDL_GPUShader* vs=shader(device_,"terrain.vert","terrain_vertex",SDL_GPU_SHADERSTAGE_VERTEX,0,1); SDL_GPUShader* fs=shader(device_,"terrain.frag","terrain_fragment",SDL_GPU_SHADERSTAGE_FRAGMENT,0,1);
     SDL_GPUVertexBufferDescription buffer{0,sizeof(GpuVertex),SDL_GPU_VERTEXINPUTRATE_VERTEX,0}; SDL_GPUVertexAttribute attribute{0,0,SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,0};
     SDL_GPUColorTargetDescription target{SDL_GetGPUSwapchainTextureFormat(device_,window_),{}};
-    SDL_GPUGraphicsPipelineCreateInfo info{}; info.vertex_shader=vs; info.fragment_shader=fs; info.vertex_input_state={&buffer,1,&attribute,1}; info.primitive_type=SDL_GPU_PRIMITIVETYPE_TRIANGLELIST; info.target_info={&target,1,SDL_GPU_TEXTUREFORMAT_INVALID,false};
+    SDL_GPUGraphicsPipelineCreateInfo info{}; info.vertex_shader=vs; info.fragment_shader=fs; info.vertex_input_state={&buffer,1,&attribute,1}; info.primitive_type=SDL_GPU_PRIMITIVETYPE_TRIANGLELIST; info.rasterizer_state.cull_mode=SDL_GPU_CULLMODE_NONE; info.depth_stencil_state.compare_op=SDL_GPU_COMPAREOP_LESS_OR_EQUAL; info.depth_stencil_state.enable_depth_test=true; info.depth_stencil_state.enable_depth_write=true; info.target_info={&target,1,SDL_GPU_TEXTUREFORMAT_D32_FLOAT,true};
     fillPipeline_=SDL_CreateGPUGraphicsPipeline(device_,&info); info.rasterizer_state.fill_mode=SDL_GPU_FILLMODE_LINE; wirePipeline_=SDL_CreateGPUGraphicsPipeline(device_,&info);
     SDL_ReleaseGPUShader(device_,vs); SDL_ReleaseGPUShader(device_,fs); if(!fillPipeline_||!wirePipeline_) fail("Terrain-Pipeline");
 }
@@ -78,7 +78,7 @@ void TerrainRenderer::uploadMesh(const TerrainMesh& mesh) {
     vertices.reserve(mesh.vertices().size());
     for (const TerrainVertex& vertex : mesh.vertices()) {
         const float x = (vertex.u - .5f) * 52.f;
-        const float z = -vertex.v * 84.f;
+        const float z = -vertex.v * 168.f;
         vertices.push_back({x, terrainHeightAt(x, z), z});
     }
     SDL_GPUBufferCreateInfo info{SDL_GPU_BUFFERUSAGE_VERTEX,static_cast<Uint32>(vertices.size()*sizeof(GpuVertex))}; vertexBuffer_=SDL_CreateGPUBuffer(device_,&info); if(!vertexBuffer_) fail("Terrain-Buffer"); upload(device_,vertexBuffer_,vertices.data(),info.size);
@@ -103,31 +103,39 @@ void TerrainRenderer::loadHeightmap() {
 float TerrainRenderer::terrainHeightAt(float worldX, float worldZ) const {
     // Gleiche 100×100-m-Abbildung wie im Vertex-Shader; bilineare Abtastung.
     const float u = std::clamp(worldX / 52.f + .5f, 0.f, 1.f);
-    const float v = std::clamp(-worldZ / 84.f, 0.f, 1.f);
+    const float v = std::clamp(-worldZ / 168.f, 0.f, 1.f);
     const int x = std::clamp(static_cast<int>(u * (heightmapWidth_ - 1)), 0, heightmapWidth_ - 1);
     const int z = std::clamp(static_cast<int>(v * (heightmapHeight_ - 1)), 0, heightmapHeight_ - 1);
     return heightSamples_[z * heightmapWidth_ + x];
 }
 
+void TerrainRenderer::ensureDepthBuffer(Uint32 width, Uint32 height) {
+    if (depthBuffer_ && width == depthWidth_ && height == depthHeight_) return;
+    SDL_ReleaseGPUTexture(device_, depthBuffer_);
+    SDL_GPUTextureCreateInfo info{}; info.type=SDL_GPU_TEXTURETYPE_2D; info.format=SDL_GPU_TEXTUREFORMAT_D32_FLOAT; info.usage=SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET; info.width=width; info.height=height; info.layer_count_or_depth=1; info.num_levels=1; info.sample_count=SDL_GPU_SAMPLECOUNT_1;
+    depthBuffer_=SDL_CreateGPUTexture(device_, &info); if (!depthBuffer_) fail("Depth-Buffer"); depthWidth_=width; depthHeight_=height;
+}
+
 void TerrainRenderer::update(float deltaSeconds) {
     // Langsamer, gleichmäßiger Vorwärtsflug ausschließlich entlang der Z-Achse.
     flightDistance_ += 4.f * deltaSeconds;
-    if (flightDistance_ > 70.f) flightDistance_ -= 70.f;
+    if (flightDistance_ > 145.f) flightDistance_ -= 145.f;
 }
 
 void TerrainRenderer::render() {
     SDL_GPUCommandBuffer* commands=SDL_AcquireGPUCommandBuffer(device_); SDL_GPUTexture* backbuffer=nullptr; Uint32 width{},height{};
     if(!SDL_WaitAndAcquireGPUSwapchainTexture(commands,window_,&backbuffer,&width,&height)) fail("Swapchain"); if(!backbuffer) { SDL_SubmitGPUCommandBuffer(commands); return; }
+    ensureDepthBuffer(width, height);
     SDL_GPUColorTargetInfo target{}; target.texture=backbuffer; target.clear_color={.208f,.208f,.275f,1}; target.load_op=SDL_GPU_LOADOP_CLEAR; target.store_op=SDL_GPU_STOREOP_STORE;
-    SDL_GPURenderPass* pass=SDL_BeginGPURenderPass(commands,&target,1,nullptr); SDL_GPUBufferBinding buffer{vertexBuffer_,0}; SDL_BindGPUVertexBuffers(pass,0,&buffer,1);
+    SDL_GPUDepthStencilTargetInfo depth{}; depth.texture=depthBuffer_; depth.clear_depth=1.f; depth.load_op=SDL_GPU_LOADOP_CLEAR; depth.store_op=SDL_GPU_STOREOP_DONT_CARE;
+    SDL_GPURenderPass* pass=SDL_BeginGPURenderPass(commands,&target,1,&depth); SDL_GPUBufferBinding buffer{vertexBuffer_,0}; SDL_BindGPUVertexBuffers(pass,0,&buffer,1);
     const float flightZ = -4.f - flightDistance_;
     // main.lua erzeugt das Terrain von z=0 nach z=-84: Flug ausschließlich -Z.
     const Vec3 eye{0.f, 32.f, flightZ + 12.f};
     const Vec3 lookAt{0.f, terrainHeightAt(0.f, flightZ - 10.f), flightZ - 10.f};
     const Mat4 viewProjection=camera(eye, lookAt, static_cast<float>(width)/height); SDL_PushGPUVertexUniformData(commands,0,&viewProjection,sizeof(viewProjection));
     const Material fill{{.565f,.404f,.463f,1},{.208f,.208f,.275f,1}}, wire{{1,1,1,1},{.208f,.208f,.275f,1}};
-    SDL_BindGPUGraphicsPipeline(pass,fillPipeline_); SDL_PushGPUFragmentUniformData(commands,0,&fill,sizeof(fill)); SDL_DrawGPUPrimitives(pass,vertexCount_,1,0,0);
-    SDL_BindGPUGraphicsPipeline(pass,wirePipeline_); SDL_PushGPUFragmentUniformData(commands,0,&wire,sizeof(wire)); SDL_DrawGPUPrimitives(pass,vertexCount_,1,0,0); SDL_EndGPURenderPass(pass);
+    SDL_BindGPUGraphicsPipeline(pass,fillPipeline_); SDL_PushGPUFragmentUniformData(commands,0,&fill,sizeof(fill)); SDL_DrawGPUPrimitives(pass,vertexCount_,1,0,0); SDL_EndGPURenderPass(pass);
     if(!SDL_SubmitGPUCommandBuffer(commands)) fail("Frame einreichen");
 }
 

@@ -23,6 +23,7 @@ private:
     void createPipelines();
     void uploadMesh(const TerrainMesh& mesh);
     void loadHeightmap();
+    void ensureDepthBuffer(Uint32 width, Uint32 height);
     [[nodiscard]] float terrainHeightAt(float worldX, float worldZ) const;
 
     SDL_Window* window_{};
@@ -32,6 +33,8 @@ private:
     SDL_GPUBuffer* vertexBuffer_{};
     SDL_GPUTexture* heightmap_{};
     SDL_GPUSampler* sampler_{};
+    SDL_GPUTexture* depthBuffer_{};
+    Uint32 depthWidth_{}, depthHeight_{};
     Uint32 vertexCount_{};
     float flightDistance_{0.f};
     std::vector<float> heightSamples_;

@@ -12,10 +12,13 @@ struct FragmentInput {
 };
 
 fragment float4 terrain_fragment(FragmentInput input [[stage_in]], constant Material& material [[buffer(0)]]) {
-    const float fogAmount = atan(length(input.worldPosition) * .1) * 2.0 / M_PI_F;
-    // Sichtbarer Nachweis der aus dem Alpha-Kanal erzeugten Vertexhöhe:
-    // niedrige Canyonböden sind dunkel, hohe Ränder deutlich heller.
+    // Eine Normale pro Rasterdreieck ergibt bewusstes Flat Shading.
+    float3 normal = normalize(cross(dfdx(input.worldPosition), dfdy(input.worldPosition)));
+    if (normal.y < 0.0) normal = -normal;
+    const float3 sunDirection = normalize(float3(-.35, .8, .45));
+    const float diffuse = max(dot(normal, sunDirection), 0.0);
+    const float fogAmount = atan(length(input.worldPosition) * .025) * 2.0 / M_PI_F;
     const float heightFactor = clamp(input.worldPosition.y / 18.0, 0.0, 1.0);
-    const float3 terrainColor = mix(material.terrainColor.rgb * .38, material.terrainColor.rgb * 1.35, heightFactor);
+    const float3 terrainColor = mix(material.terrainColor.rgb * .24, material.terrainColor.rgb * 1.15, heightFactor) * (.28 + diffuse * .72);
     return float4(mix(terrainColor, material.fogColor.rgb, fogAmount), material.terrainColor.a);
 }

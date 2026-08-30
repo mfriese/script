@@ -17,7 +17,7 @@ int Application::run() {
         SDL_Window* window = SDL_CreateWindow("LÖVR Heightmap — SDL3 GPU", 1280, 720, SDL_WINDOW_RESIZABLE);
         if (!window) throw std::runtime_error(SDL_GetError());
         {
-            TerrainMesh terrain(128);
+            TerrainMesh terrain(64);
             TerrainRenderer renderer(*window, terrain);
             bool running = true;
             Uint64 previousTicks = SDL_GetTicks();
